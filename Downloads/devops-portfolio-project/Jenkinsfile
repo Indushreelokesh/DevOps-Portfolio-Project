@@ -1,0 +1,101 @@
+// Jenkins declarative pipeline for the Task Tracker API.
+//
+// Requires on the Jenkins agent: docker, python3, kubectl (for the deploy stage),
+// and optionally trivy for image scanning.
+//
+// Configure these in "Manage Jenkins > Credentials":
+//   - "dockerhub-creds"  (Username/Password) -> your registry login
+//     Swap DOCKER_IMAGE below for your ECR/Docker Hub repo.
+
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "yourdockerhubuser/task-tracker"
+        IMAGE_TAG    = "${env.BUILD_NUMBER}"
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install & Lint') {
+            steps {
+                sh '''
+                    python3 -m venv .venv
+                    . .venv/bin/activate
+                    pip install --quiet -r app/requirements-dev.txt
+                    flake8 app/app.py --max-line-length=100
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    cd app && python -m pytest -v --junitxml=../test-results.xml
+                '''
+            }
+            post {
+                always {
+                    junit 'test-results.xml'
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} -t ${DOCKER_IMAGE}:latest ."
+            }
+        }
+
+        stage('Scan Image') {
+            steps {
+                // Non-blocking scan to start with; tighten to fail-the-build once
+                // you've triaged the baseline findings.
+                sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_IMAGE}:${IMAGE_TAG} || true"
+            }
+        }
+
+        stage('Push Image') {
+            when { branch 'main' }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh '''
+                        echo "$PASS" | docker login -u "$USER" --password-stdin
+                        docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
+                        docker push ${DOCKER_IMAGE}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy (local kind cluster)') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    kubectl set image deployment/task-tracker task-tracker=${DOCKER_IMAGE}:${IMAGE_TAG} -n task-tracker
+                    kubectl rollout status deployment/task-tracker -n task-tracker --timeout=120s
+                '''
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Pipeline failed — check the stage logs above."
+        }
+        always {
+            sh 'docker image prune -f || true'
+        }
+    }
+}
