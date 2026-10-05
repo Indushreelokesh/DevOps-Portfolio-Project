@@ -16,6 +16,8 @@ metadata:
   namespace: task-tracker
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: mongo }
   template:
@@ -35,6 +37,7 @@ spec:
               command: ["mongosh", "--eval", "db.adminCommand('ping')"]
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 10
           resources:
             requests: { cpu: "100m", memory: "256Mi" }
             limits: { cpu: "500m", memory: "512Mi" }
