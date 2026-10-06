@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-tracker-config
+  namespace: {{ include "task-tracker.namespace" . }}
+data:
+  MONGO_URI: "mongodb://mongo:27017/taskdb"

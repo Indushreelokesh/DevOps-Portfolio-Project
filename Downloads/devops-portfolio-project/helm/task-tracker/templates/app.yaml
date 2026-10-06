@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-tracker
+  namespace: {{ include "task-tracker.namespace" . }}
+  labels:
+    {{- include "task-tracker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels: { app: task-tracker }
+  template:
+    metadata:
+      labels: { app: task-tracker }
+    spec:
+      containers:
+        - name: task-tracker
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.app.containerPort }}
+          envFrom:
+            - configMapRef:
+                name: task-tracker-config
+          readinessProbe:
+            httpGet: { path: /ready, port: {{ .Values.app.containerPort }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: {{ .Values.app.containerPort }} }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-tracker
+  namespace: {{ include "task-tracker.namespace" . }}
+spec:
+  type: ClusterIP
+  selector: { app: task-tracker }
+  ports:
+    - port: 80
+      targetPort: {{ .Values.app.containerPort }}
+{{- if .Values.app.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: task-tracker
+  namespace: {{ include "task-tracker.namespace" . }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: task-tracker
+  minReplicas: {{ .Values.app.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.app.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.app.autoscaling.targetCPUUtilizationPercentage }} }
+{{- end }}

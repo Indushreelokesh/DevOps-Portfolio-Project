@@ -1,0 +1,45 @@
+# Default values for task-tracker.
+# Override any of these at install time with --set or a custom values file,
+# e.g.: helm install task-tracker . -f my-values.yaml
+
+app:
+  image:
+    repository: task-tracker
+    tag: local
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  containerPort: 5000
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits: { cpu: "300m", memory: "256Mi" }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+mongo:
+  image:
+    repository: mongo
+    tag: "7"
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits: { cpu: "500m", memory: "512Mi" }
+  persistence:
+    size: 1Gi
+    accessMode: ReadWriteOnce
+  # Learned the hard way: a single-instance database must use Recreate,
+  # not RollingUpdate, or two pods briefly fight over the same data volume.
+  readinessProbe:
+    timeoutSeconds: 10
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+ingress:
+  enabled: false
+  host: task-tracker.local
+  className: nginx
+
+namespace:
+  create: true
+  name: task-tracker
